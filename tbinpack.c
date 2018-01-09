@@ -122,6 +122,7 @@ loadimage(lua_State *L) {
 
 static int
 binpack(lua_State *L) {
+	int border = 1;	// add border to each sprite
 	luaL_checktype(L, 1, LUA_TTABLE);
 	int width = luaL_checkinteger(L, 2);
 	int height = luaL_checkinteger(L, 3);
@@ -149,8 +150,12 @@ binpack(lua_State *L) {
 		if (r->h > height) {
 			return luaL_error(L, "Rect at index %d's height(%d) > %d", id, r->h, height);
 		}
+		r->w += border;
+		r->h += border;
 		lua_pop(L, 3);
 	}
+	width += border;
+	height += border;
 	int num_nodes = width * 2;
 	stbrp_node *temp = lua_newuserdata(L, num_nodes * sizeof(*temp));
 

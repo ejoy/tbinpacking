@@ -59,7 +59,7 @@ local function output_altas(rect, filename)
 	end
 end
 
-local function combine_textures(rect, filename, width, height)
+local function combine_textures(rect, filename, width, height, debugrect)
 	local t = {}
 	for _, v in ipairs(rect) do
 		local tid = v.tid + 1
@@ -72,7 +72,7 @@ local function combine_textures(rect, filename, width, height)
 	end
 	for index, v in ipairs(t) do
 		local of = string.format("%s%d.png", filename, index-1)
-		tbinpack.combine(of, width, height, v)
+		tbinpack.combine(of, width, height, v, debugrect)
 	end
 end
 
@@ -80,6 +80,7 @@ local USAGE = [[
 Options:
 	-o outputfilename
 	-image (if enable, output combined image)
+	-debug (draw debug rect)
 	-i inputdir
 	-w width (default is 1024)
 	-h height (default is width)
@@ -100,7 +101,7 @@ local function main(...)
 	tbinpack.binpack(rect, width, height)
 	output_altas(rect, args.o)
 	if args.image then
-		combine_textures(rect, args.o or "output", width, height)
+		combine_textures(rect, args.o or "output", width, height, args.debug)
 	end
 end
 
