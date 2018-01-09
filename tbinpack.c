@@ -92,9 +92,49 @@ calc_rect(struct minrect *rect, stbi_uc *buffer) {
 
 }
 
+static void
+get_block(lua_State *L, const uint8_t * img, int w, int h, int x, int y) {
+	char buffer[16*4];
+	uint8_t *target = (uint8_t *)buffer;
+	img += (w * y + x) * 4;
+	if (x+4 > w || y+4> h) {
+		int i,j;
+		for (i=0;i<4;i++) {
+			if (y+i >= h) {
+				memset(target, 0, 16);
+			} else {
+				for (j=0;j<4;j++) {
+					if (x+j >= w) {
+						target[j*4+0] = 0;
+						target[j*4+1] = 0;
+						target[j*4+2] = 0;
+						target[j*4+3] = 0;
+					} else {
+						target[j*4+0] = img[j*4+0];
+						target[j*4+1] = img[j*4+1];
+						target[j*4+2] = img[j*4+2];
+						target[j*4+3] = img[j*4+3];
+					}
+				}
+				img += w * 4;
+				target += 16;
+			}
+		}
+	} else {
+		int i;
+		for (i=0;i<4;i++) {
+			memcpy(target, img, 16);
+			img += w * 4;
+			target += 16;
+		}
+	}
+	lua_pushlstring(L, buffer, 16*4);
+}
+
 static int
 loadimage(lua_State *L) {
 	const char *filename = luaL_checkstring(L, 1);
+	int loadcontent = lua_toboolean(L, 2);
 	int x,y,channels;
 	stbi_uc * buffer = stbi_load(filename, &x, &y, &channels, 0);
 	if (buffer == NULL) {
@@ -110,22 +150,43 @@ loadimage(lua_State *L) {
 	rect.width = x;
 	rect.height = y;
 	calc_rect(&rect, buffer);
-	stbi_image_free(buffer);
 	lua_pushinteger(L, rect.width);
 	lua_pushinteger(L, rect.height);
 	lua_pushinteger(L, rect.x);
 	lua_pushinteger(L, rect.y);
 	lua_pushinteger(L, rect.minw);
 	lua_pushinteger(L, rect.minh);
-	return 6;
+	if (loadcontent) {
+		int bw = rect.minw / 4 + 1;	// add 1 pixel border
+		int bh = rect.minh / 4 + 1;
+		lua_createtable(L, bw*bh, 2);
+		lua_pushinteger(L, bw);
+		lua_setfield(L, -2, "x");
+		lua_pushinteger(L, bh);
+		lua_setfield(L, -2, "y");
+		int i,j;
+		int index = 1;
+		for (i=0;i<bh;i++) {
+			for (j=0;j<bw;j++) {
+				get_block(L, buffer, rect.width, rect.height, rect.x + j*4, rect.y + i*4);
+				lua_seti(L, -2, index);
+				++index;
+			}
+		}
+	} else {
+		lua_pushnil(L);
+	}
+
+	stbi_image_free(buffer);
+	return 7;
 }
 
 static int
 binpack(lua_State *L) {
-	int border = 1;	// add border to each sprite
 	luaL_checktype(L, 1, LUA_TTABLE);
 	int width = luaL_checkinteger(L, 2);
 	int height = luaL_checkinteger(L, 3);
+	int border = luaL_optinteger(L, 4, 1);	// add border to each sprite
 	int n = lua_rawlen(L, 1);
 	struct stbrp_rect * rect = lua_newuserdata(L, n * sizeof(*rect));
 	int i;
@@ -293,13 +354,72 @@ combine(lua_State *L) {
 	return 0;
 }
 
-LUAMOD_API
-int luaopen_tbinpack(lua_State *L) {
+struct desc_bits {
+	uint8_t *ptr;
+	int pos;
+};
+
+static void
+write_desc_bits(struct desc_bits *bits, int type) {
+	if (bits->pos == 0) {
+		*bits->ptr = type;
+		bits->pos = 2;
+	} else {
+		*bits->ptr |= type << bits->pos;
+		bits->pos += 2;
+		if (bits->pos >= 8) {
+			++bits->ptr;
+			bits->pos = 0;
+		}
+	}
+}
+
+// each block use 2 bit description, 11 for RGBA 128bit, 10 for RGB 64bit, 00 for empty (all alpha are 0)
+// one byte store 4 blocks description from low bits to high bits, row-major order. The description bytes just follows block data.
+// for example, 7*7 blocks use 13 bytes description, follows by the data stream follows, which is 16 or 8 bytes per block.
+static int
+etc2pack(lua_State *L) {
+	luaL_checktype(L, 1, LUA_TTABLE);
+	int n = lua_rawlen(L, 1);
+	int desc_len = (n + 3)/4;
+	luaL_Buffer b;
+	luaL_buffinit(L, &b);
+	uint8_t tmp[desc_len];
+	struct desc_bits desc = { tmp, 0 };
+	int i;
+	static uint8_t c_zero[8] = { 0,0,0,0,0,0,0,0 };
+	static uint8_t c_one[8] = { 255,0,0,0,0,0,0,0 };
+	for (i = 1; i <= n; i++) {
+		lua_geti(L, 1, i);
+		size_t sz;
+		const char * block = luaL_checklstring(L, -1, &sz);
+		if (sz != 16) {
+			return luaL_error(L, "Invalid etc2 block length at index %d", i);
+		}
+//		if (memcmp(c_zero, block, 8) == 0) {
+//			write_desc_bits(&desc, 0);
+//		} else if (memcmp(c_one, block, 8) == 0) {
+//			write_desc_bits(&desc, 2);	// 10
+//			luaL_addlstring(&b, (const char *)block+8, 8);	// write 64bit color only
+//		} else {
+//			write_desc_bits(&desc, 3);	// 11
+			luaL_addlstring(&b, (const char *)block, 16);	// write 64bit color + 64bit alpha
+//		}
+		lua_pop(L, 1);
+	}
+//	luaL_addlstring(&b, (const char *)tmp, desc_len);
+	luaL_pushresult(&b);
+	return 1;
+}
+
+LUAMOD_API int
+luaopen_tbinpack(lua_State *L) {
 	luaL_checkversion(L);
 	luaL_Reg l[] = {
 		{ "loadimage", loadimage },
 		{ "binpack", binpack },
 		{ "combine", combine },
+		{ "etc2pack", etc2pack },
 		{ NULL, NULL },
 	};
 	luaL_newlib(L, l);
