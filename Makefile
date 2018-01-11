@@ -8,7 +8,7 @@ all : $(TARGET)
 all : winfile.dll	# only for windows
 all : etc2codec.dll
 
-$(TARGET) : tbinpack.c
+$(TARGET) : tbinpack.c transform.c
 	gcc --shared $(CFLAGS) -o $@ $^ $(LUAINC) $(LUALIB)
 
 winfile.dll : winfile.c
