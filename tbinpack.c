@@ -146,6 +146,7 @@ loadimage(lua_State *L) {
 		stbi_image_free(buffer);
 		return luaL_error(L, "%s has not RGBA channels", filename);
 	}
+
 	struct minrect rect;
 	rect.width = x;
 	rect.height = y;
@@ -173,6 +174,8 @@ loadimage(lua_State *L) {
 				++index;
 			}
 		}
+		lua_pushlstring(L, (const char *)buffer, x*y*4);
+		lua_setfield(L, -2, "content");
 	} else {
 		lua_pushnil(L);
 	}
@@ -396,30 +399,50 @@ etc2pack(lua_State *L) {
 		if (sz != 16) {
 			return luaL_error(L, "Invalid etc2 block length at index %d", i);
 		}
-//		if (memcmp(c_zero, block, 8) == 0) {
-//			write_desc_bits(&desc, 0);
-//		} else if (memcmp(c_one, block, 8) == 0) {
-//			write_desc_bits(&desc, 2);	// 10
-//			luaL_addlstring(&b, (const char *)block+8, 8);	// write 64bit color only
-//		} else {
-//			write_desc_bits(&desc, 3);	// 11
+		if (memcmp(c_zero, block, 8) == 0) {
+			write_desc_bits(&desc, 0);
+		} else if (memcmp(c_one, block, 8) == 0) {
+			write_desc_bits(&desc, 2);	// 10
+			luaL_addlstring(&b, (const char *)block+8, 8);	// write 64bit color only
+		} else {
+			write_desc_bits(&desc, 3);	// 11
 			luaL_addlstring(&b, (const char *)block, 16);	// write 64bit color + 64bit alpha
-//		}
+		}
 		lua_pop(L, 1);
 	}
-//	luaL_addlstring(&b, (const char *)tmp, desc_len);
+	luaL_addlstring(&b, (const char *)tmp, desc_len);
 	luaL_pushresult(&b);
 	return 1;
 }
+
+static int
+savepng(lua_State *L) {
+	const char *filename = luaL_checkstring(L, 1);
+	int width = luaL_checkinteger(L, 2);
+	int height = luaL_checkinteger(L, 3);
+	size_t sz;
+	const char * img = luaL_checklstring(L, 4, &sz);
+	if (sz != width * height * 4) {
+		return luaL_error(L, "Invalid image size %dx%dx4=%d, %d", width, height, width * height*4, (int)sz);
+	}
+	if (!stbi_write_png(filename, width, height, 4, img, width * 4)) {
+		return luaL_error(L, "Can't write to %s", filename);
+	}
+	return 0;
+}
+
+int transform_image(lua_State *L);
 
 LUAMOD_API int
 luaopen_tbinpack(lua_State *L) {
 	luaL_checkversion(L);
 	luaL_Reg l[] = {
 		{ "loadimage", loadimage },
+		{ "savepng", savepng },
 		{ "binpack", binpack },
 		{ "combine", combine },
 		{ "etc2pack", etc2pack },
+		{ "transform", transform_image },
 		{ NULL, NULL },
 	};
 	luaL_newlib(L, l);

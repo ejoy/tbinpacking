@@ -19,7 +19,7 @@ bitmap2segment(const uint8_t *rgba, int w, int h, int stride, struct segment *li
 		int left = -1;
 		for (j=0;j<w;j++) {
 			int a = l[j*4+3];
-			if (a > 10) {
+			if (a > 0) {
 				left = j;
 				break;
 			}
@@ -32,7 +32,7 @@ bitmap2segment(const uint8_t *rgba, int w, int h, int stride, struct segment *li
 		line[i].right = left;
 		for (j=w-1;j>left;j--) {
 			int a = l[j*4+3];
-			if (a > 10) {
+			if (a > 0) {
 				line[i].right = j;
 				break;
 			}
@@ -415,7 +415,7 @@ transform_image(lua_State *L) {
 		screen[i+1] += t.bounding_y;
 	}
 	for (i=0;i<8;i++) {
-		lua_pushinteger(L, (int)(screen[i] * 16 + 0.5));
+		lua_pushnumber(L, screen[i]);
 		lua_seti(L, -2, i+9);
 	}
 	lua_setfield(L, -2, "mapping");
